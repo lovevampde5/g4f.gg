@@ -58,11 +58,11 @@ jobs:
           mkdir -p screenshots
           
           echo "🌍 验证 WARP SOCKS5 代理 IP:"
-          # 这次绝对能成功连上 40000 端口并打印出 WARP IP
+          # 
           curl -s -x socks5://127.0.0.1:40000 https://api.ipify.org || echo "⚠️ IP获取失败"
           echo ""
           
-          # 启动虚拟桌面并运行无敌的 Python 打码脚本
+          # 启动虚拟桌面并运行 Python 打码脚本
           xvfb-run -a python renew.py
           
       - name: Upload screenshots
