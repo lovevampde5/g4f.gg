@@ -12,13 +12,10 @@ TG_TOKEN = os.getenv("TG_TOKEN", "")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
 SCREENSHOT_PATH = "renew_result.png"
 MAX_RETRIES = 3
-# 点击后最多等30秒让验证弹窗出现
-MAX_WAIT_FOR_CAPTCHA = 30
-# 验证弹窗选择器（你的弹窗就是这个）
-CAPTCHA_DIALOG = "div[role='dialog']"
-# 复选框相对于验证弹窗左上角的偏移（1920x1080已校准）
-CHECKBOX_OFFSET_X = 32
-CHECKBOX_OFFSET_Y = 44
+# 点击后最多等40秒让验证iframe出现
+MAX_WAIT_FOR_CAPTCHA = 40
+# ✅ 正确的Turnstile iframe选择器（这才是真正存在的元素）
+TURNSTILE_IFRAME = "iframe[src*='challenges.cloudflare.com/turnstile']"
 
 # ✅ 发送带截图的Telegram通知
 def send_tg_with_screenshot(text, screenshot_path):
@@ -44,49 +41,49 @@ def send_tg_with_screenshot(text, screenshot_path):
     except Exception as e:
         print(f"❌ 发送带截图通知异常：{e}")
 
-# ✅ 核心修复：点击后循环检测验证弹窗，出现立即处理
+# ✅ 核心：直接检测Turnstile iframe，出现立即用CDP嵌套点击
 def wait_and_handle_turnstile(sb):
-    print("🔍 点击完成，开始循环检测Cloudflare验证弹窗...")
+    print("🔍 点击完成，开始循环检测Cloudflare Turnstile验证...")
     start_time = time.time()
     
     while time.time() - start_time < MAX_WAIT_FOR_CAPTCHA:
         elapsed = int(time.time() - start_time)
         print(f"  已等待 {elapsed}/{MAX_WAIT_FOR_CAPTCHA} 秒...")
         
-        # ✅ 修复1：用is_element_present()检测，比is_element_visible()更可靠
-        if sb.is_element_present(CAPTCHA_DIALOG):
-            print("✅ 检测到验证弹窗！正在处理...")
-            time.sleep(2)  # 等待验证框完全渲染
+        # ✅ 修复：直接检测Turnstile iframe（这才是真正存在的元素）
+        if sb.is_element_present(TURNSTILE_IFRAME):
+            print("✅ 检测到Cloudflare Turnstile验证iframe！正在处理...")
+            time.sleep(2)  # 等待iframe完全加载
             
-            # 三重验证方案
+            # 三重验证方案（按优先级）
             try:
-                print("ℹ️ 尝试方案1：官方solve_captcha()")
-                sb.solve_captcha()
-                time.sleep(4)
-                if not sb.is_element_present(CAPTCHA_DIALOG):
+                # 方案1：SeleniumBase官方CDP嵌套点击（专门处理iframe+shadow DOM）
+                print("ℹ️ 尝试方案1：CDP嵌套点击iframe内复选框")
+                sb.cdp.nested_click(TURNSTILE_IFRAME, "input[type='checkbox']")
+                time.sleep(5)
+                if not sb.is_element_present(TURNSTILE_IFRAME):
                     print("✅ 方案1验证通过！")
                     return True
             except Exception as e:
                 print(f"❌ 方案1失败：{e}")
             
             try:
-                print("ℹ️ 尝试方案2：指定父容器点击")
-                sb.uc_gui_click_captcha(CAPTCHA_DIALOG, reconnect_time=3)
-                time.sleep(4)
-                if not sb.is_element_present(CAPTCHA_DIALOG):
+                # 方案2：官方solve_captcha()
+                print("ℹ️ 尝试方案2：官方solve_captcha()")
+                sb.solve_captcha()
+                time.sleep(5)
+                if not sb.is_element_present(TURNSTILE_IFRAME):
                     print("✅ 方案2验证通过！")
                     return True
             except Exception as e:
                 print(f"❌ 方案2失败：{e}")
             
             try:
-                print("ℹ️ 尝试方案3：CDP坐标点击")
-                dialog_rect = sb.cdp.get_gui_element_rect(CAPTCHA_DIALOG)
-                checkbox_x = dialog_rect["x"] + CHECKBOX_OFFSET_X
-                checkbox_y = dialog_rect["y"] + CHECKBOX_OFFSET_Y
-                sb.cdp.gui_click_x_y(checkbox_x, checkbox_y, timeframe=0.3)
+                # 方案3：终极坐标点击（1920x1080窗口固定坐标）
+                print("ℹ️ 尝试方案3：固定坐标点击")
+                sb.cdp.gui_click_x_y(912, 516, timeframe=0.3)
                 time.sleep(5)
-                if not sb.is_element_present(CAPTCHA_DIALOG):
+                if not sb.is_element_present(TURNSTILE_IFRAME):
                     print("✅ 方案3验证通过！")
                     return True
             except Exception as e:
@@ -97,8 +94,8 @@ def wait_and_handle_turnstile(sb):
         
         time.sleep(1)
     
-    # ✅ 修复2：只有当30秒内都没出现验证弹窗，才认为直接续期成功
-    print("ℹ️ 30秒内未检测到验证弹窗，直接续期成功")
+    # 只有当40秒内都没出现验证iframe，才认为直接续期成功
+    print("ℹ️ 40秒内未检测到验证，直接续期成功")
     return True
 
 # ✅ 单次续期流程
@@ -204,8 +201,8 @@ def run_renew_once():
 
 # 主程序
 if __name__ == "__main__":
-    print("\n===== 🚀 g4f.gg自动续期（逻辑修复最终版） =====")
-    print(f"⚙️ 配置：验证弹窗最长等待{MAX_WAIT_FOR_CAPTCHA}秒，最多重试{MAX_RETRIES}次")
+    print("\n===== 🚀 g4f.gg自动续期（终极iframe检测版） =====")
+    print(f"⚙️ 配置：验证最长等待{MAX_WAIT_FOR_CAPTCHA}秒，最多重试{MAX_RETRIES}次")
     
     for attempt in range(MAX_RETRIES + 1):
         if attempt > 0:
