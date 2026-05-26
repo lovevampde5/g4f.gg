@@ -1,98 +1,108 @@
 import os
 import sys
-import requests
+import time
 from seleniumbase import SB
+from selenium.webdriver.common.by import By
+import requests
 
+# ==========================================
+# 核心配置
+# ==========================================
 TARGET_URL = "https://g4f.gg/wufuyang"
-
 TG_TOKEN = os.getenv("TG_TOKEN", "")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
+SCREENSHOT_PATH = "renew_result.png"
 
-def send_tg(msg):
+# ✅ 发送带截图的 Telegram 通知
+def send_tg_with_screenshot(text, screenshot_path):
+    print(f"\n📤 正在发送带截图的 Telegram 通知...")
     if not TG_TOKEN or not TG_CHAT_ID:
-        print("未配置TG通知")
+        print("❌ 通知失败：TG_TOKEN 或 TG_CHAT_ID 为空")
         return
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={
-                "chat_id": TG_CHAT_ID,
-                "text": msg
-            },
-            timeout=15
-        )
-    except Exception as e:
-        print(e)
-
-print("===== G4F 自动续期 =====")
-
-try:
-
-    with SB(
-        uc=True,
-        xvfb=True,
-        headless=True,
-        window_size="1920,1080"
-    ) as sb:
-
-        print("打开页面...")
-        sb.open(TARGET_URL)
-
-        sb.sleep(8)
-
-        print("点击 ADD 3 HOURS...")
-
-        sb.click(
-            "//button[contains(translate(text(),'abcdefghijklmnopqrstuvwxyz','ABCDEFGHIJKLMNOPQRSTUVWXYZ'),'ADD 3 HOURS')]",
-            timeout=15
-        )
-
-        sb.sleep(3)
-
-        print("处理 Cloudflare 验证...")
-
+    if not os.path.exists(screenshot_path):
         try:
-            sb.uc_gui_click_captcha()
-            print("验证完成")
+            url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+            data = {"chat_id": TG_CHAT_ID, "text": f"🤖 G4F 自动续期\n{text}"}
+            requests.post(url, json=data, timeout=10)
+            return
         except Exception as e:
-            print(f"验证码处理失败: {e}")
+            print(f"❌ 文字消息发送异常：{e}")
+            return
 
-        sb.sleep(8)
+    try:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
+        with open(screenshot_path, "rb") as f:
+            files = {"photo": f}
+            data = {"chat_id": TG_CHAT_ID, "caption": f"🤖 G4F 自动续期\n{text}"}
+            requests.post(url, files=files, data=data, timeout=15)
+    except Exception as e:
+        print(f"❌ 发送带截图通知异常：{e}")
 
-        print("尝试二次点击...")
+# 主程序
+if __name__ == "__main__":
+    print("\n===== 🚀 g4f.gg 自动续期 =====")
 
+    if os.path.exists(SCREENSHOT_PATH):
         try:
-            sb.click(
-                "//button[contains(translate(text(),'abcdefghijklmnopqrstuvwxyz','ABCDEFGHIJKLMNOPQRSTUVWXYZ'),'ADD 3 HOURS')]",
-                timeout=10
-            )
+            os.remove(SCREENSHOT_PATH)
         except:
             pass
 
-        sb.sleep(10)
+    try:
+        with SB(headless=True, window_size="1920,1080") as sb:
+            sb.open(TARGET_URL)
+            sb.sleep(15)  # 等待页面加载
 
-        remaining = "未知"
+            print("🔍 正在执行续期点击...")
+            
+            # 使用列表存放可能的选择器，优先尝试精准的 XPath
+            # 直接使用 sb.click 自动处理等待与重试，避免 StaleElementReferenceException
+            selectors = [
+                "//button[contains(translate(text(), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'ADD 3 HOURS')]",
+                "//button[contains(text(), 'ADD')]"
+            ]
+            
+            clicked = False
+            for selector in selectors:
+                try:
+                    # sb.click(timeout=10) 会自动等待元素出现并重试，非常稳健
+                    sb.click(selector, timeout=10)
+                    print(f"✅ 成功点击按钮 (选择器: {selector})")
+                    clicked = True
+                    break
+                except Exception:
+                    continue 
 
-        try:
-            remaining = sb.get_text(
-                "//*[contains(text(),'SERVER TIME REMAINING')]"
-            )
-        except:
-            pass
+            if not clicked:
+                sb.save_screenshot(SCREENSHOT_PATH)
+                send_tg_with_screenshot("❌ 续期失败：未能在规定时间内定位并点击按钮", SCREENSHOT_PATH)
+                sys.exit(1)
 
-        msg = f"✅ G4F续期成功\n{remaining}"
+            print("👆 已点击续期按钮，等待页面刷新...")
+            sb.sleep(15)
 
-        print(msg)
+            # 续期完成后截图
+            sb.save_screenshot(SCREENSHOT_PATH)
 
-        send_tg(msg)
+            # 获取剩余时间
+            remaining = "无法获取"
+            try:
+                remaining = sb.get_text("//div[contains(text(), 'SERVER TIME REMAINING')]/following-sibling::div[1]")
+            except:
+                pass
 
-except Exception as e:
+            success_msg = f"✅ 续期成功！\n剩余时间：{remaining}"
+            print(f"\n🎉 {success_msg}")
+            send_tg_with_screenshot(success_msg, SCREENSHOT_PATH)
 
-    err = f"❌ 续期失败:\n{str(e)}"
+    except Exception as e:
+        error_msg = f"❌ 续期失败：{str(e)}"
+        print(f"\n{error_msg}")
+        if os.path.exists(SCREENSHOT_PATH):
+            send_tg_with_screenshot(error_msg, SCREENSHOT_PATH)
+        else:
+            send_tg_with_screenshot(error_msg, "")
+        sys.exit(1)
 
-    print(err)
-
-    send_tg(err)
-
-    sys.exit(1)
+    print("\n===== 🛑 脚本执行完成 =====")
