@@ -5,15 +5,17 @@ from seleniumbase import SB
 import requests
 
 # ==========================================
-# 核心配置（可根据你的情况调整）
+# 核心配置（已针对g4f.gg弹窗验证优化）
 # ==========================================
 TARGET_URL = "https://g4f.gg/wufuyang"
 TG_TOKEN = os.getenv("TG_TOKEN", "")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
 SCREENSHOT_PATH = "renew_result.png"
-MAX_RETRIES = 3  # 失败自动重试3次（总共运行4次）
-INITIAL_WAIT_AFTER_CLICK = 10  # ✅ 点击后先等10秒再开始检测验证码
-TOTAL_VERIFICATION_WAIT = 60   # ✅ 总共给60秒让验证出现和完成
+MAX_RETRIES = 3
+# ✅ 点击后先等15秒（足够弹窗加载）
+INITIAL_WAIT_AFTER_CLICK = 15
+# ✅ 验证框父容器选择器（你的弹窗就是这个）
+CAPTCHA_PARENT_SELECTOR = "div[role='dialog']"
 
 # ✅ 发送带截图的 Telegram 通知
 def send_tg_with_screenshot(text, screenshot_path):
@@ -39,62 +41,41 @@ def send_tg_with_screenshot(text, screenshot_path):
     except Exception as e:
         print(f"❌ 发送带截图通知异常：{e}")
 
-# ✅ 终极延迟验证处理（点击后先等够时间再检测）
-def handle_extremely_delayed_turnstile(sb):
-    print(f"⏳ 点击完成，先等待 {INITIAL_WAIT_AFTER_CLICK} 秒让验证弹窗加载...")
-    time.sleep(INITIAL_WAIT_AFTER_CLICK)  # 核心：先等够时间，不着急检测
+# ✅ 专门处理g4f.gg点击后弹出的Turnstile验证
+def handle_g4f_turnstile(sb):
+    print(f"⏳ 点击完成，等待 {INITIAL_WAIT_AFTER_CLICK} 秒让验证弹窗完全加载...")
+    time.sleep(INITIAL_WAIT_AFTER_CLICK)
     
-    print("🔍 开始检测 Cloudflare 验证...")
-    start_time = time.time()
-    turnstile_selectors = [
-        "#cf-turnstile",
-        "#turnstile-widget",
-        "iframe[src*='challenges.cloudflare.com']",
-        "div[class*='cf-turnstile']"
-    ]
-    
-    while time.time() - start_time < TOTAL_VERIFICATION_WAIT:
-        elapsed = int(time.time() - start_time)
-        print(f"  已等待 {elapsed}/{TOTAL_VERIFICATION_WAIT} 秒...")
-        
-        for selector in turnstile_selectors:
-            if sb.is_element_visible(selector):
-                print("✅ 检测到 Cloudflare Turnstile 验证框")
-                try:
-                    # 再等2秒让验证框完全渲染和加载脚本
-                    time.sleep(2)
-                    
-                    # 方法1：官方专用方法（最稳定）
-                    sb.uc_gui_click_captcha()
-                    time.sleep(5)
-                    
-                    # 方法2：CDP 直接点击（备用）
-                    if sb.is_element_visible(selector):
-                        print("ℹ️ 尝试 CDP 方式解决验证...")
-                        sb.cdp.gui_click_element(f"{selector} div")
-                        time.sleep(5)
-                    
-                    # 等待验证完成和页面刷新
-                    sb.wait_for_element_not_visible(selector, timeout=25)
-                    print("✅ Cloudflare 验证通过！")
-                    return True
-                    
-                except Exception as e:
-                    print(f"❌ 验证处理失败：{e}")
-                    return False
-        
-        # 检查是否已经续期成功（有时不会触发验证）
+    # 检测验证弹窗是否出现
+    if sb.is_element_visible(CAPTCHA_PARENT_SELECTOR):
+        print("✅ 检测到验证弹窗，正在处理Cloudflare Turnstile...")
         try:
-            sb.get_text("//div[contains(text(), 'SERVER TIME REMAINING')]")
-            print("ℹ️ 未触发验证，直接续期成功")
-            return True
-        except:
-            pass
+            # ✅ 核心修复1：显式指定验证框父容器
+            # ✅ 核心修复2：断开驱动连接3秒，模拟真人操作（最关键）
+            sb.uc_gui_click_captcha(CAPTCHA_PARENT_SELECTOR, reconnect_time=3)
+            time.sleep(5)
             
-        time.sleep(1)  # 每秒检测一次，不浪费资源
-    
-    print(f"⚠️ 超时：{TOTAL_VERIFICATION_WAIT} 秒内未检测到验证码或验证未完成")
-    return False
+            # 等待验证完成和弹窗消失
+            sb.wait_for_element_not_visible(CAPTCHA_PARENT_SELECTOR, timeout=25)
+            print("✅ Cloudflare验证通过，弹窗已关闭！")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 验证处理失败：{e}")
+            # 备用方案：CDP直接点击验证框
+            try:
+                print("ℹ️ 尝试备用CDP方案...")
+                sb.cdp.gui_click_element(f"{CAPTCHA_PARENT_SELECTOR} #cf-turnstile div")
+                time.sleep(5)
+                sb.wait_for_element_not_visible(CAPTCHA_PARENT_SELECTOR, timeout=20)
+                print("✅ 备用方案验证通过！")
+                return True
+            except Exception as e2:
+                print(f"❌ 备用方案也失败：{e2}")
+                return False
+    else:
+        print("ℹ️ 未检测到验证弹窗，直接续期成功")
+        return True
 
 # ✅ 单次续期流程
 def run_renew_once():
@@ -112,10 +93,14 @@ def run_renew_once():
             window_size="1920,1080",
             locale="en",
             incognito=True,
-            block_images=False
+            block_images=False,
+            # ✅ 核心修复3：增强反检测
+            undetectable=True,
+            uc_cdp_events=True
         ) as sb:
-            sb.open(TARGET_URL)
-            sb.sleep(10)  # 页面完全加载
+            # ✅ 核心修复4：用uc_open_with_reconnect打开页面，断开驱动
+            sb.driver.uc_open_with_reconnect(TARGET_URL, reconnect_time=5)
+            sb.sleep(10)
             
             print("🔍 正在查找续期按钮...")
             selectors = [
@@ -138,11 +123,11 @@ def run_renew_once():
                 send_tg_with_screenshot("❌ 续期失败：未能找到并点击续期按钮", SCREENSHOT_PATH)
                 return False
             
-            # 处理极端延迟的验证码
-            verification_success = handle_extremely_delayed_turnstile(sb)
+            # 处理g4f专属的弹窗验证
+            verification_success = handle_g4f_turnstile(sb)
             if not verification_success:
                 sb.save_screenshot(SCREENSHOT_PATH)
-                send_tg_with_screenshot("❌ 续期失败：Cloudflare 验证未通过", SCREENSHOT_PATH)
+                send_tg_with_screenshot("❌ 续期失败：Cloudflare验证未通过", SCREENSHOT_PATH)
                 return False
             
             print("👆 验证完成，等待续期结果...")
@@ -170,15 +155,15 @@ def run_renew_once():
             send_tg_with_screenshot(error_msg, "")
         return False
 
-# 主程序（带自动重试）
+# 主程序
 if __name__ == "__main__":
-    print("\n===== 🚀 g4f.gg 自动续期（极端延迟验证版） =====")
-    print(f"⚙️ 配置：点击后等待 {INITIAL_WAIT_AFTER_CLICK} 秒，总验证时长 {TOTAL_VERIFICATION_WAIT} 秒，最多重试 {MAX_RETRIES} 次")
+    print("\n===== 🚀 g4f.gg 自动续期（弹窗验证专属版） =====")
+    print(f"⚙️ 配置：点击后等待{INITIAL_WAIT_AFTER_CLICK}秒，最多重试{MAX_RETRIES}次")
     
     for attempt in range(MAX_RETRIES + 1):
         if attempt > 0:
             print(f"\n🔄 第 {attempt} 次重试...")
-            time.sleep(8)  # 重试前多等一会
+            time.sleep(10)
         
         if run_renew_once():
             print("\n===== 🛑 脚本执行成功 =====")
