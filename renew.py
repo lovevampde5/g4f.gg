@@ -41,7 +41,7 @@ def send_tg_with_screenshot(text, screenshot_path):
 
 # 主程序
 if __name__ == "__main__":
-    print("\n===== 🚀 g4f.gg 自动续期 (先验证后点击版) =====")
+    print("\n===== 🚀 g4f.gg 自动续期 (两次点击破盾版) =====")
 
     if os.path.exists(SCREENSHOT_PATH):
         try:
@@ -50,20 +50,51 @@ if __name__ == "__main__":
             pass
 
     try:
-        # uc=True 开启反检测
-        # 建议：在 Linux 服务器上跑可以用 xvfb=True，本地调试用 headless=False
+        # uc=True 开启反检测模式
+        # 提示：Linux 服务器运行建议保持 headless2=True 或改为 xvfb=True；本地调试可改为 headless=False
         with SB(uc=True, headless2=True, window_size="1920,1080") as sb:
             
             print("🌐 正在打开目标网页...")
             sb.uc_open_with_disconnect(TARGET_URL) 
             sb.sleep(10)  # 等待初始页面加载
 
+            # 定义续期按钮的选择器
+            selectors = [
+                "//button[contains(translate(text(), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'ADD 3 HOURS')]",
+                "//button[contains(text(), 'ADD')]"
+            ]
+
             # ==========================================
-            # 🔥 步骤 1：先处理 Cloudflare Turnstile 验证
+            # 🔥 步骤 1：【第一次点击】—— 用来唤醒/触发验证码
+            # ==========================================
+            print("🔍 正在执行【第一次】续期点击（触发验证弹窗）...")
+            clicked_first = False
+            used_selector = None
+            
+            for selector in selectors:
+                try:
+                    sb.uc_click(selector, timeout=10)
+                    print(f"✅ 第一次点击成功 (选择器: {selector})")
+                    clicked_first = True
+                    used_selector = selector  # 记录成功点击的选择器
+                    break
+                except Exception:
+                    continue 
+
+            if not clicked_first:
+                sb.save_screenshot(SCREENSHOT_PATH)
+                send_tg_with_screenshot("❌ 续期失败：未能完成第一次按钮点击", SCREENSHOT_PATH)
+                sys.exit(1)
+
+            print("👆 已触发点击，等待 5 秒检测是否弹出验证框...")
+            sb.sleep(5)
+
+            # ==========================================
+            # 🔥 步骤 2：【穿透验证】—— 解决 Cloudflare 拦截
             # ==========================================
             cf_iframe = "iframe[src*='challenges.cloudflare.com']"
             if sb.is_element_present(cf_iframe):
-                print("🛡️ 检测到 Cloudflare 验证框，开始穿透处理...")
+                print("🛡️ 检测到 Cloudflare 验证弹窗！开始穿透...")
                 
                 # 切入验证码 iframe
                 sb.switch_to_frame(cf_iframe)
@@ -78,41 +109,38 @@ if __name__ == "__main__":
                     except Exception:
                         sb.uc_click("body", timeout=5)
                 
-                # 切回主页面
+                # 必须切回主页面
                 sb.switch_to_default_content()
                 
-                # 🔥 关键：听从指示，过完验证后在原地死等 12 秒，确保 Token 生效、拦截解除
-                print("⏳ 验证点击完成，等待 12 秒让环境稳定...")
+                print("⏳ 验证点击完成，留出 12 秒让环境稳定、解除锁定...")
                 sb.sleep(12)
             else:
-                print("✨ 未发现即时验证框，直接进入下一步。")
+                print("✨ 提示：未检测到验证弹窗，可能环境安全已直接放行。")
 
             # ==========================================
-            # 🔥 步骤 2：等一下之后，再点击续期按钮
+            # 🔥 步骤 3：【第二次点击】—— 验证通过后再次点击，真正成功续期
             # ==========================================
-            print("🔍 正在定位续期按钮...")
-            selectors = [
-                "//button[contains(translate(text(), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'ADD 3 HOURS')]",
-                "//button[contains(text(), 'ADD')]"
-            ]
+            print("🚀 正在执行【第二次】续期点击（真正提交续期）...")
+            clicked_second = False
             
-            clicked = False
-            for selector in selectors:
+            # 优先使用第一次成功过的选择器
+            target_selectors = [used_selector] + selectors if used_selector else selectors
+            for selector in target_selectors:
+                if not selector: continue
                 try:
-                    # 使用 uc_click 进行无痕点击
                     sb.uc_click(selector, timeout=10)
-                    print(f"✅ 成功点击续期按钮 (选择器: {selector})")
-                    clicked = True
+                    print(f"🎉 第二次点击成功！续期请求已正式发出。")
+                    clicked_second = True
                     break
                 except Exception:
-                    continue 
+                    continue
 
-            if not clicked:
+            if not clicked_second:
                 sb.save_screenshot(SCREENSHOT_PATH)
-                send_tg_with_screenshot("❌ 续期失败：未能在规定时间内定位并点击按钮", SCREENSHOT_PATH)
+                send_tg_with_screenshot("❌ 续期失败：验证后无法进行第二次点击确认", SCREENSHOT_PATH)
                 sys.exit(1)
 
-            print("👆 已成功点击续期，等待 10 秒让页面刷新数据...")
+            print("⏳ 等待 10 秒让服务器处理并刷新数据...")
             sb.sleep(10)
 
             # 续期完成后截图
@@ -125,7 +153,7 @@ if __name__ == "__main__":
             except:
                 pass
 
-            success_msg = f"✅ 续期操作完成！\n最新服务器剩余时间：{remaining}"
+            success_msg = f"✅ 续期操作成功完成！\n最新服务器剩余时间：{remaining}"
             print(f"\n🎉 {success_msg}")
             send_tg_with_screenshot(success_msg, SCREENSHOT_PATH)
 
