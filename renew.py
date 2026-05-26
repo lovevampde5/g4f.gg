@@ -41,7 +41,7 @@ def send_tg_with_screenshot(text, screenshot_path):
 
 # 主程序
 if __name__ == "__main__":
-    print("\n===== 🚀 g4f.gg 自动续期 (抗 Cloudflare 增强版) =====")
+    print("\n===== 🚀 g4f.gg 自动续期 (特定顺序优化版) =====")
 
     if os.path.exists(SCREENSHOT_PATH):
         try:
@@ -50,27 +50,14 @@ if __name__ == "__main__":
             pass
 
     try:
-        # 💡 核心修改 1：启用 uc=True (UC防检测模式)
-        # 注意：如果是在 Linux 无界面服务器(如 GitHub Actions)运行且报错，可尝试将 headless=True 改为 headless2=True 
+        # 启用 UC 防检测模式
         with SB(uc=True, headless=True, window_size="1920,1080") as sb:
             
-            # 💡 核心修改 2：使用 uc_open_with_reconnect 打开网页，防止被 CF 直接侦测拦截
-            print(f"🌐 正在安全打开目标网址: {TARGET_URL}")
+            print(f"🌐 正在打开目标网址: {TARGET_URL}")
             sb.uc_open_with_reconnect(TARGET_URL, 4)
-            sb.sleep(6)  # 等待验证码组件渲染完毕
+            sb.sleep(8)  # 等待初始页面加载
 
-            # 💡 核心修改 3：调用内置过盾方法，模拟鼠标点击 “请验证您是真人” 选框
-            print("🛡️ 正在绕过 Cloudflare Turnstile 人机验证...")
-            try:
-                sb.uc_gui_click_captcha()
-                print("✅ 已触发自动点击验证框，等待验证通过...")
-                sb.sleep(10)  # 留出足够时间让 Cloudflare 放行并跳转主页
-            except Exception as ce:
-                print(f"⚠️ 自动过盾方法调用提示 (若页面已正常加载可忽略): {ce}")
-
-            print("🔍 正在执行续期点击...")
-            
-            # 💡 优化：XPath 改用 contains(., 'TEXT') 代替 contains(text(), 'TEXT')，防止因标签嵌套导致无法识别
+            print("🔍 步骤 1：正在寻找并点击续期按钮...")
             selectors = [
                 "//button[contains(translate(., 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'ADD 3 HOURS')]",
                 "//button[contains(., 'ADD')]",
@@ -90,23 +77,33 @@ if __name__ == "__main__":
 
             if not clicked:
                 sb.save_screenshot(SCREENSHOT_PATH)
-                # 如果还是失败，保存源码方便看卡在了哪一步
                 try:
                     with open("page_source.html", "w", encoding="utf-8") as f:
                         f.write(sb.get_page_source())
-                    print("💾 找不到续期按钮，已保存当前网页源码至 page_source.html")
                 except:
                     pass
-                send_tg_with_screenshot("❌ 续期失败：在通过验证后未能在页面中定位到有效的续期按钮", SCREENSHOT_PATH)
+                send_tg_with_screenshot("❌ 续期失败：未能在初始页面中定位到续期按钮", SCREENSHOT_PATH)
                 sys.exit(1)
 
-            print("👆 已点击续期按钮，等待页面响应刷新...")
-            sb.sleep(15)
+            # 💡 核心修改：点击按钮后，按照你的提示，等待验证码弹窗显现
+            print("⏳ 步骤 2：已点击续期按钮，等待 Cloudflare 验证码弹窗浮现...")
+            sb.sleep(8)  # 给验证码动画和加载留出 8 秒时间
 
-            # 续期完成后截图
+            # 💡 核心修改：此时再执行破盾，去点击“验证您是真人”
+            print("🛡️ 步骤 3：正在检测并点击 Cloudflare Turnstile 真人验证框...")
+            try:
+                # 尝试使用高级 GUI 验证码点击
+                sb.uc_gui_click_captcha()
+                print("🔘 已触发自动点击验证框，等待验证通过及页面响应...")
+                sb.sleep(12)  # 留出足够时间让 Cloudflare 放行并完成续期后台通信
+            except Exception as ce:
+                print(f"⚠️ 自动点击验证码时出现提示（若已成功可忽略）: {ce}")
+                sb.sleep(5)
+
+            # 续期和验证完成后截图存证
             sb.save_screenshot(SCREENSHOT_PATH)
 
-            # 获取剩余时间
+            print("📊 步骤 4：正在获取续期后的剩余时间...")
             remaining = "无法获取"
             try:
                 remaining = sb.get_text("//div[contains(., 'SERVER TIME REMAINING')]/following-sibling::div[1]")
@@ -116,7 +113,7 @@ if __name__ == "__main__":
                 except:
                     pass
 
-            success_msg = f"✅ 续期成功！\n剩余时间：{remaining}"
+            success_msg = f"✅ 续期流程执行完毕！\n结果参考截图。\n提取到的剩余时间：{remaining}"
             print(f"\n🎉 {success_msg}")
             send_tg_with_screenshot(success_msg, SCREENSHOT_PATH)
 
