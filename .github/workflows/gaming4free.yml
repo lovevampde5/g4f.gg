@@ -2,8 +2,8 @@ name: 🚀 G4F 自动续期
 
 on:
   schedule:
-    # 每小时的第40分钟执行一次
-        - cron: "40 * * * *"   # 
+    # 每2小时的第40分钟执行一次
+    - cron: "40 */2 * * *"   
   workflow_dispatch: # 允许你在 GitHub 页面上点击按钮手动触发测试
 
 jobs:
