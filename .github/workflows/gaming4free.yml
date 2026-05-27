@@ -2,7 +2,7 @@ name: 🚀 G4F 自动续期
 
 on:
   schedule:
-    # 每天北京时间 23:00 准时运行 (23:00 对应的 UTC 时间是 15:00)
+    # 每小时的第40分钟执行一次
         - cron: "40 * * * *"   # 
   workflow_dispatch: # 允许你在 GitHub 页面上点击按钮手动触发测试
 
