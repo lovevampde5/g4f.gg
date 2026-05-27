@@ -45,18 +45,17 @@ def parse_time_to_seconds(time_str):
     return 0
 
 if __name__ == "__main__":
-    print("\n===== 🚀 g4f.gg 自动续期 (精准点击版) =====")
+    print("\n===== 🚀 g4f.gg 自动续期 (Iframe 穿透版) =====")
 
     if os.path.exists(SCREENSHOT_PATH):
         try: os.remove(SCREENSHOT_PATH)
         except: pass
 
     try:
-        # ✨ 恢复 1920x1080 桌面大分辨率，防止移动端布局导致坐标错位
         with SB(uc=True, test=True, locale_code="en", window_size="1920,1080") as sb:
             sb.uc_open_with_reconnect(TARGET_URL, 10)
-            sb.sleep(5)
-            sb.maximize_window() # 强制最大化窗口
+            sb.sleep(6)
+            sb.maximize_window()
 
             # 1. 记录点击前的初始时间
             time_before_str = "无法获取"
@@ -82,43 +81,80 @@ if __name__ == "__main__":
 
             if not target_selector:
                 sb.save_screenshot(SCREENSHOT_PATH)
-                send_tg_with_screenshot("❌ 续期失败：未能定位到续期按钮，请检查页面是否改版", SCREENSHOT_PATH)
+                send_tg_with_screenshot("❌ 续期失败：未能定位到续期按钮", SCREENSHOT_PATH)
                 sys.exit(1)
 
-            # ✨ 2. 确保滚动到按钮可见区域再点击
             print(f"🎯 发现目标按钮，正在滚动并聚焦...")
             sb.scroll_to_element(target_selector)
             sb.sleep(2)
 
-            # ✨ 3. 组合拳点击策略
-            print("👇 正在尝试标准点击...")
-            sb.click(target_selector) # 优先采用你原脚本成功的原生点击
+            print("👇 触发标准点击...")
+            sb.click(target_selector) 
             sb.sleep(3)
 
-            # 检查是否成功唤起验证码或者成功刷新，如果没有，用 JS 强行注入点击
+            # 如果没动静，用 JS 强补一刀
             if not sb.is_text_visible("VERIFY YOU'RE HUMAN") and not ("hours added" in sb.get_page_source().lower()):
-                print("⚠️ 标准点击似乎未生效，正在尝试 JavaScript 强行点击...")
+                print("⚠️ 标准点击未响应，改用 JavaScript 强行注入点击...")
                 sb.js_click(target_selector)
                 sb.sleep(3)
 
-            # 4. 对抗人机验证弹窗
-            if sb.is_text_visible("VERIFY YOU'RE HUMAN") or sb.is_text_visible("请确认您是真人"):
-                print("⚠️ 成功触发 Cloudflare Turnstile 人机验证弹窗！开始尝试自动破解...")
-                for i in range(3):
-                    print(f"🔄 正在进行第 {i+1} 次尝试过验证...")
-                    sb.uc_gui_click_captcha() # 尝试点击验证框
+            # ✨ 2. 核心升级：强力攻克 Cloudflare Turnstile 验证框
+            cf_iframe_selector = "iframe[src*='challenges.cloudflare.com']"
+            
+            if sb.is_element_visible(cf_iframe_selector) or sb.is_text_visible("VERIFY YOU'RE HUMAN"):
+                print("⚠️ [检测成功] 发现 Cloudflare Turnstile 验证弹窗，启动精准穿透攻坚...")
+                
+                # ─── 突破策略 A：切入 Iframe 内部直接点击核心微件 ───
+                try:
+                    print("🔄 [策略 A] 正在将视口切换至 Cloudflare 内部空间...")
+                    sb.wait_for_element(cf_iframe_selector, timeout=5)
+                    sb.switch_to_frame(cf_iframe_selector) # 穿透进入 Iframe
+                    sb.sleep(1.5)
+                    
+                    # Turnstile 内部复选框可能使用的复合选择器
+                    inner_selectors = [
+                        "#challenge-stage", 
+                        "input[type='checkbox']", 
+                        ".ct-checkbox-label", 
+                        "span.mark",
+                        "label.cb-lb"
+                    ]
+                    
+                    for inner_sel in inner_selectors:
+                        try:
+                            if sb.is_element_visible(inner_sel):
+                                print(f"🎯 找到验证核心组件: {inner_sel}，正在执行深层点击...")
+                                sb.click(inner_sel)
+                                sb.sleep(1)
+                                break
+                        except:
+                            continue
+                    
+                    # 无论成功与否，必须切回主页面顶层
+                    sb.switch_to_default_content()
+                    print("🚀 已从内部空间返回主页面，等待验证结果流转...")
                     sb.sleep(6)
-                    if not sb.is_text_visible("VERIFY YOU'RE HUMAN") and not sb.is_text_visible("请确认您是真人"):
-                        print("🎉 验证码弹窗已消失！")
-                        break
-            else:
-                print("ℹ️ 未检测到验证码弹窗，可能直接通过或点击未响应。")
+                except Exception as iframe_err:
+                    print(f"ℹ️ 策略 A 运行异常 (可能已自动跳过): {iframe_err}")
+                    sb.switch_to_default_content()
 
-            print("⏳ 等待最终结果确认...")
-            sb.sleep(10)
+                # ─── 突破策略 B：如果弹窗还在，启用原本的 GUI 盲点作为终极兜底 ───
+                if sb.is_element_visible(cf_iframe_selector):
+                    print("🔄 [策略 B] 弹窗依然存在，启动系统级 GUI 模拟点击轰炸...")
+                    for i in range(2):
+                        sb.uc_gui_click_captcha()
+                        sb.sleep(5)
+                        if not sb.is_element_visible(cf_iframe_selector):
+                            print("🎉 弹窗消失，兜底策略生效！")
+                            break
+            else:
+                print("ℹ️ 未检测到验证码阻挡，可能已直接通过。")
+
+            print("⏳ 预留缓冲时间，等待服务器刷新数据...")
+            sb.sleep(8)
             sb.save_screenshot(SCREENSHOT_PATH)
 
-            # 5. 记录点击后的时间
+            # 3. 记录点击后的时间并严格比对
             time_after_str = "无法获取"
             time_after_secs = 0
             try:
@@ -128,17 +164,16 @@ if __name__ == "__main__":
             except:
                 pass
 
-            # 6. 最终严格校验
             page_source = sb.get_page_source().lower()
             has_success_toast = "hours added" in page_source or "已延长" in page_source
             time_increased = (time_after_secs - time_before_secs) > 3600 
 
             if has_success_toast or time_increased:
-                success_msg = f"✅ 续期真正成功！\n当前剩余时间：{time_after_str}"
+                success_msg = f"✅ 续期成功！验证码已完美击破！\n当前剩余时间：{time_after_str}"
                 print(f"\n🎉 {success_msg}")
                 send_tg_with_screenshot(success_msg, SCREENSHOT_PATH)
             else:
-                fail_msg = f"❌ 续期失败：按钮点击未生效或未通过验证。\n点击前: {time_before_str}\n点击后: {time_after_str}"
+                fail_msg = f"❌ 续期失败：虽然成功呼出了验证码，但最终未能通过校验。\n点击前: {time_before_str}\n点击后: {time_after_str}"
                 print(f"\n{fail_msg}")
                 send_tg_with_screenshot(fail_msg, SCREENSHOT_PATH)
                 sys.exit(1)
